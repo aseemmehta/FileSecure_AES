@@ -5,7 +5,16 @@ video formats
 Author: Aseem Mehta
 email: am1435@rit.edu
 """
+
+try:
+    from Tkinter import *
+    from Tkinter import filedialog
+except:
+    from tkinter import *
+    from tkinter import filedialog
+    
 import copy, math, random
+import concurrent.futures
 
 """
 Class contains functions which are common to all other classes
@@ -95,9 +104,9 @@ Class is used to generate AES 128 Key and all the round Keys
 class AESkey:
     
     #Generates 128 bit Key
-    def keygenerator():
+    def keygenerator(folderPath):
         key = random.getrandbits(128)
-        f = open("Key.txt","w+")
+        f = open(folderPath+"Key.txt","w+")
         key = "0x%0.32X"%(key)
         f.write(key)
         f.close()
@@ -134,9 +143,9 @@ Class is used to generate 192 128 Key and all the round Keys
 class AES192:
     
     #Generates 192 bit Key
-    def keygenerator():
+    def keygenerator(folderPath):
         key = random.getrandbits(192)
-        f = open("Key.txt","w+")
+        f = open(folderPath+"Key.txt","w+")
         key = "0x%0.48X"%(key)
         f.write(key)
         f.close()
@@ -200,9 +209,9 @@ class AES256:
         return int(s0+s1+s2+s3,16)
     
     #Generates 256 bit Key
-    def keygenerator():
+    def keygenerator(folderPath):
         key = random.getrandbits(256)
-        f = open("Key.txt","w+")
+        f = open(folderPath+"Key.txt","w+")
         key = "0x%0.64X"%(key)
         f.write(key)
         f.close()
@@ -348,33 +357,38 @@ class Encryption:
             blocks.append(tempblock)
         return blocks
 
+    def runHelp(textBlock,key):
+        if len(textBlock) <16:
+            textBlock = textBlock + [0]*(16-len(textBlock)-1)+[16-len(textBlock)-1]
+        firstKeyAddition = []
+        for i in range(0,16,4):
+            firstKeyAddition.append(Encryption.firstkeyaddition(textBlock[i+0:i+4],key[0][int(i/4)]))   
+        for j in range(1,len(key)-1):
+            firstKeyAddition = Encryption.encryptText(firstKeyAddition,key[j])           
+        return Encryption.lastRoundEncryptText(firstKeyAddition,key[-1])
+        #return firstKeyAddition
+
     # runs the Encryption
-    def run(fileName,AESchoice):
-        if AESchoice == '1':
-            key1 = AESkey.keygenerator()
+    def run(fileName,AESchoice,folderPath):
+        if AESchoice == '128':
+            key1 = AESkey.keygenerator(folderPath)
             key = AESkey.keyTransform(key1)
-        elif AESchoice == '2':
-            key1 = AES192.keygenerator()
+        elif AESchoice == '192':
+            key1 = AES192.keygenerator(folderPath)
             key = AES192.keyTransform(key1)
-        elif AESchoice == '3':
-            key1 = AES256.keygenerator()
+        elif AESchoice == '256':
+            key1 = AES256.keygenerator(folderPath)
             key = AES256.keyTransform(key1)
-        print("Key: ",key1)
         text = Encryption.readfile(fileName)
-        
+        key = [key]*len(text)
         encryptedText = []
-        for textBlock in text:
-            if len(textBlock) <16:
-                textBlock = textBlock + [0]*(16-len(textBlock)-1)+[16-len(textBlock)-1]
-            firstKeyAddition = []
-            for i in range(0,16,4):
-                firstKeyAddition.append(Encryption.firstkeyaddition(textBlock[i+0:i+4],key[0][int(i/4)]))   
-            for j in range(1,len(key)-1):
-                firstKeyAddition = Encryption.encryptText(firstKeyAddition,key[j])           
-            firstKeyAddition = Encryption.lastRoundEncryptText(firstKeyAddition,key[-1])
-            encryptedText.append(firstKeyAddition)
-        Encryption.writeFile("encryptedText.txt",encryptedText)
-        print("File Encrypted")
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            results = executor.map(Encryption.runHelp,text,key)
+            for result in results:
+                encryptedText.append(result)
+
+        Encryption.writeFile(folderPath+"encryptedFile.txt",encryptedText)
+        return "File Encrypted","encryptedFile.txt",key1
 
 
 """
@@ -490,7 +504,7 @@ class Decryption:
         return text
 
     # writes decrypted data to specific file
-    def writeDecryptedFile(fileName,decryptedData):
+    def writeDecryptedFile(folderPath,fileName,decryptedData):
         dataString = []
         data = decryptedData[:-1]
         endLine = decryptedData[-1]
@@ -518,50 +532,204 @@ class Decryption:
         for i in range(endValue):
             dataString.append(int(endLine[i],16))
         binary_format = bytes(dataString)
-        f = open(fileName,'w+b')
+        f = open(folderPath+fileName,'w+b')
         f.write(binary_format)
         f.close()
         
+        
+    def runHelp(textBlock,key):
+        decryption = Decryption.decryptFirstText(textBlock,key)
+        for j in range(2,len(key)):
+            decryption = Decryption.decryptText(decryption,key[len(key)-j])
+        return Decryption.lastKeyAddition(decryption,key[0])
+
     # runs decryption program
-    def run(decryptFileName,key,AESchoice):
-        fileName = "encryptedText.txt"
-        if AESchoice == '1':
+    def run(decryptFileName,fileName,folderPath,key,AESchoice):
+        #fileName = "encryptedText.txt"
+        if AESchoice == '128':
             key = AESkey.keyTransform(key)
-        elif AESchoice == '2':
+        elif AESchoice == '192':
             key = AES192.keyTransform(key)    
-        elif AESchoice == '3':
+        elif AESchoice == '256':
             key = AES256.keyTransform(key)
         EncryptedData = Decryption.readfile(fileName)
-        
+        key = [key]*len(EncryptedData)
         decryptedText = []
-        for textBlock in EncryptedData:
-            decryption = Decryption.decryptFirstText(textBlock,key)
-            for j in range(2,len(key)):
-                decryption = Decryption.decryptText(decryption,key[len(key)-j])
-            decryptedText.append(Decryption.lastKeyAddition(decryption,key[0]))
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            results = executor.map(Decryption.runHelp,EncryptedData,key)
+        
+            for result in results:
+                decryptedText.append(result)
        
-        Decryption.writeDecryptedFile(decryptFileName,decryptedText)
-        print("File Decrypted")    
+        Decryption.writeDecryptedFile(folderPath,decryptFileName,decryptedText)
+        return "File Decrypted"   
+
+# provides the file path
+def chooseFile():
+    window.sourceFile = filedialog.askopenfilename(parent=window, initialdir= "/", title='Please select a directory')
+
+# provides the directory path
+def chooseDir():
+    window.sourceFolder =  filedialog.askdirectory(parent=window, initialdir= "/", title='Please select a directory')
+
+# Runs Encryption
+def encryption(AESchoice,fileName, folderPath):
+    if AESchoice == None or fileName == "" or folderPath == "":
+        selection = "Enter All Values"
+        encryptOp.config(text = selection)
+    else:
+        if "/" in folderPath:
+            folderPath = folderPath+"/"
+        else:
+            folderPath = folderPath+"\\"
+        progress,name,key = Encryption.run(fileName,AESchoice,folderPath)
+        selection = "Progress: "+progress+"\nFileName: "+name
+        encryptOp.config(text = selection)
+        keyText = Text(encryptOpFrame,height=1, borderwidth=0)
+        keyText.insert(2.0,"Key: "+key)
+        keyText.place(relx = 0, rely = 0.6,relwidth = 1,relheight = 0.4)
+
+#Runs Decryption
+def decryption(AESchoice,fileName,folderPath,formatValue,key):
+    if AESchoice == None or fileName == "" or key == "" or folderPath =="":
+        selection = "Enter All Values"
+        encryptOp.config(text = selection)
+    else:       
+        if (AESchoice == '128' and len(key) == 34) or (AESchoice == '192' and len(key) == 50) or (AESchoice == '256' and len(key) == 66):
+            decryptFileName = "DecryptedFile"+formatValue
+            if "/" in folderPath:
+                folderPath = folderPath+"/"
+            else:
+                folderPath = folderPath+"\\"            
+            progress = Decryption.run(decryptFileName,fileName,folderPath,key,AESchoice)
+            selection = progress
+            decryptOp.config(text = selection)
+        else:
+            decryptOp.config(text = "Enter correct Key")
+
 
 """
-Main center to call all the functions based on user inputs
-"""        
-def main():
-    x= True
-    while(x):
-        option = input('Choose\n1 for Encryption\n2 for Decryption\n')
-        AESchoice = input('Choose\n1 for AES 128\n2 for AES 192\n3 for AES 256\n') 
-        if (option =='1' or option =='2')and (AESchoice =='1' or AESchoice=='2'or AESchoice=='3'):
-            x = False
-    
-    if option =='1':
-        fileName = input('Enter path to file to be encrypted\n')
-        Encryption.run(fileName,AESchoice)
-        pass
-    else:
-        decryptFileName = input('Provide the name of file and format of the origional file (abc.txt)\n')
-        key = input('EnterDecryption Key in format (0xABCD...8293)\n')
-        Decryption.run(decryptFileName,key,AESchoice)       
+GUI Code
+"""
+#Create the main Application window
+window = Tk()
+window.geometry("800x800")
+window.title('File Secure AES')
 
-if __name__ =="__main__":
-    main()
+#Created just to provide perspective
+frame = Frame(window, bg = 'SkyBlue1', bd = 10)
+frame.place(relx = 0.5, rely = 0.025,relwidth = 0.95, relheight = 0.95, anchor = 'n')
+
+# encryptFrame contains all the functionality of encryption
+encryptFrame = Frame(frame, bg = 'coral', bd = 10)
+encryptFrame.place(relx = 0.5, rely = 0.02,relwidth = 0.9, relheight = 0.46, anchor = 'n')
+
+# encryptIpFrame consists of all Encryption Inputs
+encryptIpFrame = Frame(encryptFrame, bg = 'thistle1', bd = 10)
+encryptIpFrame.place(relx = 0.5, rely = 0.05,relwidth = 0.75, relheight = 0.65, anchor = 'n')
+
+encryptLabel = Label(encryptIpFrame, text = 'Encryption',bg = 'thistle1', bd = 5)
+encryptLabel.place(relwidth = 1, relheight =0.15)
+
+
+AESlabel = Label(encryptIpFrame, text = 'Select AES \nTechnique',bg = 'plum')
+AESlabel.place(relx = 0, rely = 0.15, relwidth = 0.5, relheight =0.3)
+# Selcts the correct AES Key Length
+var = StringVar()
+R1 = Radiobutton(encryptIpFrame, text = "AES\n128", variable = var, value = '128')
+R1.place(relx = 0.5,rely = 0.15, relwidth = 0.17, relheight =0.3)
+
+R2 = Radiobutton(encryptIpFrame, text = "AES\n192", variable = var, value = '192')
+R2.place(relx = 0.67,rely = 0.15, relwidth = 0.17, relheight =0.3)
+
+R3 = Radiobutton(encryptIpFrame, text = "AES\n256", variable = var, value = '256')
+R3.place(relx = 0.83,rely = 0.15, relwidth = 0.17, relheight =0.3)
+
+
+encryptFileLabel = Label(encryptIpFrame, text = 'Encrypt File',bg = 'yellow')
+encryptFileLabel.place(rely = 0.45, relwidth = 0.5, relheight =0.15)
+
+# contains file and folder paths
+window.sourceFile = ''
+window.sourceFolder = ''
+# Button selects file to be encrypted
+encryptChooseFile = Button(encryptIpFrame, text = "Select File", width = 20, height = 3, command = chooseFile)
+encryptChooseFile.place(relx = 0.5,rely = 0.45, relwidth = 0.5, relheight =0.15)
+
+encryptFolderLabel = Label(encryptIpFrame, text = 'Select Folder to save\nEncrypted file',bg = 'cyan')
+encryptFolderLabel.place(rely = 0.6, relwidth = 0.5, relheight =0.2)
+# select Directory where key and encrypted file is placed
+encryptChooseFolder = Button(encryptIpFrame, text = "Select Directory", width = 20, height = 3, command = chooseDir)
+encryptChooseFolder.place(relx = 0.5,rely = 0.6, relwidth = 0.5, relheight =0.2)
+# Starts encryption process by calling function encryption
+encryptButton = Button(encryptIpFrame, text = "Start Encryption", command = lambda: encryption(var.get(),window.sourceFile,window.sourceFolder))
+encryptButton.place(relx = 0.5,rely = 0.8, relwidth = 0.5, relheight =0.2)
+
+# contains output of the encryption
+encryptOpFrame = Frame(encryptFrame, bg = 'thistle1', bd = 10)
+encryptOpFrame.place(relx = 0.5, rely = 0.75,relwidth = 0.95, relheight = 0.25, anchor = 'n')
+
+encryptOp = Label(encryptOpFrame)
+encryptOp.place(relx = 0, rely = 0,relwidth = 1,relheight = 0.6)
+
+
+
+# decryptFrame contains all the functionality of decryption
+decryptFrame = Frame(frame, bg = 'coral', bd = 10)
+decryptFrame.place(relx = 0.5, rely = 0.5,relwidth = 0.9, relheight = 0.5, anchor = 'n')
+
+# decryptIpFrame consists of all Decryption Inputs
+decryptIpFrame = Frame(decryptFrame, bg = 'thistle1', bd = 10)
+decryptIpFrame.place(relx = 0.5, rely = 0.025,relwidth = 0.75, relheight = 0.78, anchor = 'n')
+
+decryptLabel = Label(decryptIpFrame, text = 'Decryption',bg = 'thistle1', bd = 5)
+decryptLabel.place(relwidth = 1, relheight =0.1)
+
+decryptAESlabel = Label(decryptIpFrame, text = 'Select AES Technique',bg = 'plum')
+decryptAESlabel.place(relx = 0, rely = 0.15, relwidth = 0.5, relheight =0.15)
+# Selcts the correct AES Key Length
+decryptVar = StringVar()
+decryptR1 = Radiobutton(decryptIpFrame, text = "AES\n128", variable = decryptVar, value = '128')
+decryptR1.place(relx = 0.5,rely = 0.15, relwidth = 0.17, relheight =0.15)
+
+decryptR2 = Radiobutton(decryptIpFrame, text = "AES\n192", variable = decryptVar, value = '192')
+decryptR2.place(relx = 0.67,rely = 0.15, relwidth = 0.17, relheight =0.15)
+
+decryptR3 = Radiobutton(decryptIpFrame, text = "AES\n256", variable = decryptVar, value = '256')
+decryptR3.place(relx = 0.83,rely = 0.15, relwidth = 0.17, relheight =0.15)
+
+decryptFileLabel = Label(decryptIpFrame, text = 'Decrypt File',bg = 'yellow')
+decryptFileLabel.place(rely = 0.3, relwidth = 0.5, relheight =0.1)
+# Button selects file to be decrypted
+decryptChooseFile = Button(decryptIpFrame, text = "Select File", width = 20, height = 3, command = chooseFile)
+decryptChooseFile.place(relx = 0.5,rely = 0.3, relwidth = 0.5, relheight =0.1)
+
+decryptFolderLabel = Label(decryptIpFrame, text = 'Select Folder to save File',bg = 'cyan')
+decryptFolderLabel.place(rely = 0.4, relwidth = 0.5, relheight =0.1)
+# select folder to save decrypted file
+decryptChooseFolder = Button(decryptIpFrame, text = "Select Directory", width = 20, height = 3, command = chooseDir)
+decryptChooseFolder.place(relx = 0.5,rely = 0.4, relwidth = 0.5, relheight =0.1)
+
+decryptFormatLabel = Label(decryptIpFrame, text = 'Decrypt file format\n(e.g.: .txt)',bg = 'snow4')
+decryptFormatLabel.place(rely = 0.5, relwidth = 0.5, relheight =0.18)
+# requires correct file format
+decryptEnterFormat = Entry(decryptIpFrame, font = ('fixed',15))
+decryptEnterFormat.place(relx = 0.5,rely = 0.5, relwidth = 0.5, relheight =0.18)
+
+decryptFormatLabel = Label(decryptIpFrame, text = 'Security Key format\n(0xABCD...8293)	',bg = 'yellow')
+decryptFormatLabel.place(rely = 0.68, relwidth = 0.5, relheight =0.18)
+# enter the key with which file was encrypted
+decryptEnterKey = Entry(decryptIpFrame, font = ('fixed',15))
+decryptEnterKey.place(relx = 0.5,rely = 0.68, relwidth = 0.5, relheight =0.18)
+# start Decryption
+decryptButton = Button(decryptIpFrame, text = "Start Decryption", command = lambda: decryption(decryptVar.get(),window.sourceFile,window.sourceFolder,decryptEnterFormat.get(),decryptEnterKey.get()))
+decryptButton.place(relx = 0.5,rely = 0.87, relwidth = 0.5, relheight =0.15)
+
+# contains output of the decryption
+decryptOpFrame = Frame(decryptFrame, bg = 'thistle1', bd = 10)
+decryptOpFrame.place(relx = 0.5, rely = 0.85,relwidth = 0.95, relheight = 0.1, anchor = 'n')
+
+decryptOp = Label(decryptOpFrame)
+decryptOp.pack()
+
+window.mainloop()
